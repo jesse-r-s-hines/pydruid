@@ -332,7 +332,12 @@ class Cursor(object):
 
         headers = {"Content-Type": "application/json"}
 
-        payload = {"query": query, "context": self.context, "header": self.header}
+        payload = {
+            "query": query,
+            "context": self.context,
+            "header": self.header,
+            "resultFormat": "objectLines",
+        }
 
         auth = (
             requests.auth.HTTPBasicAuth(self.user, self.password) if self.user else None
@@ -369,62 +374,24 @@ class Cursor(object):
         # Druid will stream the data in chunks of 8k bytes, splitting the JSON
         # between them; setting `chunk_size` to `None` makes it use the server
         # size
-        chunks = r.iter_content(chunk_size=None, decode_unicode=True)
+        chunks = r.iter_lines(chunk_size=None, decode_unicode=True)
         Row = None
-        for row in rows_from_chunks(chunks):
-            # update description
-            if self.description is None:
-                self.description = (
-                    list(row.items()) if self.header else get_description_from_row(row)
-                )
+        for row in chunks:
+            if row != "":  # Response ends with a blank line
+                row = json.loads(row)
 
-            # return row in namedtuple
-            if Row is None:
-                Row = namedtuple("Row", row.keys(), rename=True)
-            yield Row(*row.values())
+                # update description
+                if self.description is None:
+                    self.description = (
+                        list(row.items())
+                        if self.header
+                        else get_description_from_row(row)
+                    )
 
-
-def rows_from_chunks(chunks):
-    """
-    A generator that yields rows from JSON chunks.
-
-    Druid will return the data in chunks, but they are not aligned with the
-    JSON objects. This function will parse all complete rows inside each chunk,
-    yielding them as soon as possible.
-    """
-    body = ""
-    for chunk in chunks:
-        if chunk:
-            body = "".join((body, chunk))
-
-        # find last complete row
-        boundary = 0
-        brackets = 0
-        in_string = False
-        for i, char in enumerate(body):
-            if char == '"':
-                if not in_string:
-                    in_string = True
-                elif body[i - 1] != "\\":
-                    in_string = False
-
-            if in_string:
-                continue
-
-            if char == "{":
-                brackets += 1
-            elif char == "}":
-                brackets -= 1
-                if brackets == 0 and i > boundary:
-                    boundary = i + 1
-
-        rows = body[:boundary].lstrip("[,")
-        body = body[boundary:]
-
-        for row in json.loads(
-            "[{rows}]".format(rows=rows), object_pairs_hook=OrderedDict
-        ):
-            yield row
+                # return row in namedtuple
+                if Row is None:
+                    Row = namedtuple("Row", row.keys(), rename=True)
+                yield Row(*row.values())
 
 
 def apply_parameters(operation, parameters):

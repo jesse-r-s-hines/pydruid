@@ -16,7 +16,7 @@ class CursorTestSuite(unittest.TestCase):
         response = Response()
         response.status_code = 200
         response.raw = BytesIO(
-            b'[{"name": "alice"}, {"name": "bob"}, {"name": "charlie"}]'
+            b'{"name": "alice"}\n{"name": "bob"}\n{"name": "charlie"}\n\n'
         )
         requests_post_mock.return_value = response
         Row = namedtuple("Row", ["name"])
@@ -31,7 +31,22 @@ class CursorTestSuite(unittest.TestCase):
     def test_execute_empty_result(self, requests_post_mock):
         response = Response()
         response.status_code = 200
-        response.raw = BytesIO(b"[]")
+        # Druid objectLines '\n\n' on empty
+        response.raw = BytesIO(b"\n\n")
+        requests_post_mock.return_value = response
+
+        cursor = Cursor("http://example.com/")
+        cursor.execute("SELECT * FROM table")
+        result = cursor.fetchall()
+        expected = []
+        self.assertEqual(result, expected)
+
+    @patch("requests.post")
+    def test_execute_true_empty_result(self, requests_post_mock):
+        response = Response()
+        response.status_code = 200
+        # I don't believe druid will actually return an empty response but check it anyways
+        response.raw = BytesIO(b"")
         requests_post_mock.return_value = response
 
         cursor = Cursor("http://example.com/")
@@ -44,7 +59,7 @@ class CursorTestSuite(unittest.TestCase):
     def test_context(self, requests_post_mock):
         response = Response()
         response.status_code = 200
-        response.raw = BytesIO(b"[]")
+        response.raw = BytesIO(b"\n\n")
         requests_post_mock.return_value = response
 
         url = "http://example.com/"
@@ -59,7 +74,12 @@ class CursorTestSuite(unittest.TestCase):
             auth=None,
             stream=True,
             headers={"Content-Type": "application/json"},
-            json={"query": query, "context": context, "header": False},
+            json={
+                "query": query,
+                "context": context,
+                "header": False,
+                "resultFormat": "objectLines",
+            },
             verify=True,
             cert=None,
             proxies=None,
@@ -69,7 +89,7 @@ class CursorTestSuite(unittest.TestCase):
     def test_header_false(self, requests_post_mock):
         response = Response()
         response.status_code = 200
-        response.raw = BytesIO(b'[{"name": "alice"}]')
+        response.raw = BytesIO(b'{"name": "alice"}\n\n')
         requests_post_mock.return_value = response
         Row = namedtuple("Row", ["name"])
 
@@ -89,7 +109,7 @@ class CursorTestSuite(unittest.TestCase):
     def test_header_true(self, requests_post_mock):
         response = Response()
         response.status_code = 200
-        response.raw = BytesIO(b'[{"name": null}, {"name": "alice"}]')
+        response.raw = BytesIO(b'{"name": null}\n{"name": "alice"}\n\n')
         requests_post_mock.return_value = response
         Row = namedtuple("Row", ["name"])
 
@@ -106,7 +126,7 @@ class CursorTestSuite(unittest.TestCase):
     def test_names_with_underscores(self, requests_post_mock):
         response = Response()
         response.status_code = 200
-        response.raw = BytesIO(b'[{"_name": null}, {"_name": "alice"}]')
+        response.raw = BytesIO(b'{"_name": null}\n{"_name": "alice"}\n\n')
         requests_post_mock.return_value = response
         Row = namedtuple("Row", ["_name"], rename=True)
 
